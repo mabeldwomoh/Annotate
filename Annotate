@@ -1,0 +1,273 @@
+Claude- Stand Count Trend Line
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+
+final <- read_excel(file.choose())
+
+final$Hectares <- as.numeric(final$Hectares)
+final$Rainfall <- as.numeric(final$Rainfall)
+final$LT       <- as.numeric(final$LT)
+head(final)
+# FIX 1: keep Date as a DATE, not a factor.
+# as.factor() here was the cause of the blank plot: format(<factor>, "%b %d")
+# does not reformat anything, so Date_factor came out as "2024-10-09" instead
+# of "Oct 09", and scale_fill_manual() then matched nothing -> all bars NA.
+
+
+final$Date <- as.Date(final$Date)
+
+variety_to_plot <- "AG27XF3"
+
+
+plot_dataa <- final %>%
+  filter(Variety == variety_to_plot) %>%
+  group_by(Date) %>%
+  summarise(
+    Mean_Hectares = mean(Hectares, na.rm = TRUE),
+    SD = sd(Hectares, na.rm = TRUE),
+    n  = n(),
+    SE = SD / sqrt(n),
+    LT = mean(LT, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(Date)
+
+plot_dataa$Date_factor <- factor(
+  format(plot_dataa$Date, "%b %d"),
+  levels = format(plot_dataa$Date, "%b %d")
+)
+
+# Check this prints "Oct 09" "Oct 16" ... If it prints dates, FIX 1 didn't take.
+print(levels(plot_dataa$Date_factor))
+
+my_letters <- c("b","a","a","a","a","c")
+plot_dataa$Letters  <- my_letters
+plot_dataa$letter_y <- plot_dataa$Mean_Hectares + plot_dataa$SE + 8
+
+
+# numeric x positions - the annotations need these
+plot_dataa$x <- seq_len(nrow(plot_dataa))
+MAXSURV <- max(plot_dataa$Mean_Hectares)
+MAX_X   <- plot_dataa$x[which.max(plot_dataa$Mean_Hectares)]
+
+# plateau = dates sharing a letter with the max
+max_ltr <- plot_dataa$Letters[which.max(plot_dataa$Mean_Hectares)]
+shares  <- vapply(plot_dataa$Letters, function(l)
+  any(strsplit(l, "")[[1]] %in% strsplit(max_ltr, "")[[1]]), logical(1))
+PLATEAU <- range(plot_dataa$x[shares])
+
+# decline window = last plateau date -> the date after it
+DECLINE <- c(PLATEAU[2], PLATEAU[2] + 1)
+
+stand_max <- 300
+temp_min  <- min(plot_dataa$LT, na.rm = TRUE)
+temp_max  <- max(plot_dataa$LT, na.rm = TRUE)
+
+plot_dataa$LT_scaled <-
+  (plot_dataa$LT - temp_min) / (temp_max - temp_min) * stand_max
+
+# ---- ANNOTATION HEIGHTS --------------------------------------------------
+# y-axis stays at 300. The bracket sits just above the tallest letter, the
+# plateau caption just above the bracket, both clamped so they cannot run
+# off the top. Positions are computed, so switching variety still works.
+BRACKET_Y   <- min(max(plot_dataa$letter_y) + 9, 290)
+BRACKET_TIP <- BRACKET_Y - 6
+PLATEAU_Y   <- BRACKET_Y + 9
+DECLINE_Y   <- 293
+
+# ---- decline window temperatures (label text only, no reference line) ----
+LT_survived <- plot_dataa$LT[PLATEAU[2]]
+LT_declined <- plot_dataa$LT[DECLINE[2]]
+
+decline_label <- sprintf("decline window\nsurvived %.1f \u00b0C  \u2192  %.1f \u00b0C",
+                         LT_survived, LT_declined)
+
+
+# FIX 2: x is NUMERIC here, not Date_factor. The date labels are put back
+# by scale_x_continuous() below. Mixing numeric annotate() xmin/xmax with a
+# discrete x is what threw "Discrete value supplied to a continuous scale".
+ggplot(plot_dataa, aes(x = x)) +
+  
+  annotate("rect",
+           xmin = DECLINE[1], xmax = DECLINE[2],
+           ymin = -Inf, ymax = Inf,
+           fill = "red", alpha = 0.07) +
+  annotate("text",
+           x = mean(DECLINE), y = DECLINE_Y,
+           label = decline_label,
+           color = "darkred", size = 4.7, lineheight = 0.95) +
+  
+  geom_hline(yintercept = MAXSURV,
+             linetype = "dashed", color = "darkgreen", linewidth = 1.2) +
+  # Label sits BELOW the line. Above it, it collides with the plateau
+  # bracket's left tick whenever the plateau starts at the first date.
+  annotate("text",
+           x = 0.55, y = MAXSURV - 7, hjust = 0,
+           label = paste0("max survival = ",
+                          format(round(MAXSURV) * 1000,
+                                 big.mark = ",", scientific = FALSE),
+                          " plants/ha"),
+           color = "darkgreen", size = 3.9) +
+  
+  geom_col(
+    aes(y = Mean_Hectares, fill = Date_factor),
+    color = "grey20",
+    linewidth = 0.35,
+    width = 0.4
+  ) +
+  
+  geom_errorbar(
+    aes(ymin = Mean_Hectares - SE,
+        ymax = Mean_Hectares + SE),
+    width = 0.25,
+    linewidth = 0.8,
+    color = "black"
+  ) +
+  
+  geom_text(
+    aes(y = letter_y, label = Letters),
+    size = 8
+  ) +
+  
+  annotate("point", x = MAX_X, y = MAXSURV,
+           color = "darkgreen", size = 3) +
+  
+  annotate("segment",
+           x = PLATEAU[1], xend = PLATEAU[2],
+           y = BRACKET_Y, yend = BRACKET_Y,
+           color = "purple4", linewidth = 0.9) +
+  annotate("segment", x = PLATEAU[1], xend = PLATEAU[1],
+           y = BRACKET_Y, yend = BRACKET_TIP, color = "purple4", linewidth = 0.9) +
+  annotate("segment", x = PLATEAU[2], xend = PLATEAU[2],
+           y = BRACKET_Y, yend = BRACKET_TIP, color = "purple4", linewidth = 0.9) +
+  annotate("text",
+           x = mean(PLATEAU), y = PLATEAU_Y,
+           label = "plateau - no significant loss",
+           color = "purple4", size = 5) +
+  
+  geom_line(
+    aes(y = LT_scaled, group = 1, color = "Temperature"),
+    linewidth = 2.5,
+    linetype=1
+  ) +
+  
+  geom_point(
+    aes(y = LT_scaled, color = "Temperature"),
+    size = 4
+  ) +
+  
+  scale_fill_manual(
+    name = "",
+    values = c(
+      "Oct 09" = "#85B7EB",   # blue
+      "Oct 16" = "#EF9F27",   # amber
+      "Oct 21" = "#AFA9EC",   # purple
+      "Oct 27" = "#97C459",   # green
+      "Nov 05" = "#ED93B1",   # pink
+      "Nov 13" = "#B4B2A9"    # grey-tan
+    )
+  ) +
+  
+  scale_color_manual(
+    name = "",
+    values = c("Temperature" = "blue4")
+  ) +
+  
+  # FIX 3: numeric axis, date labels restored
+  scale_x_continuous(
+    breaks = plot_dataa$x,
+    labels = as.character(plot_dataa$Date_factor)
+  ) +
+  
+  scale_y_continuous(
+    name = "1,000 plants/ha",
+    limits = c(0, 300),
+    breaks = seq(0, 300, by = 25),
+    sec.axis = sec_axis(
+      ~ (. / stand_max) * (temp_max - temp_min) + temp_min,
+      name = "Temperature (\u00b0C)"     # FIX 4: was "(mm)" - LT is degrees
+    )
+  ) +
+  
+  labs(
+    x = "Date of Observation",
+    title = variety_to_plot
+  ) +
+  
+  # dates first, temperature key after - both in a single row below the plot
+  guides(
+    fill  = guide_legend(nrow = 1, order = 1),
+    color = guide_legend(nrow = 1, order = 2)
+  ) +
+  
+  theme_bw() +
+  theme(
+    axis.text.x       = element_text(angle = 45, hjust = 1, size = 16, color = "black"),
+    axis.text.y.left  = element_text(size = 16, color = "black"),
+    axis.text.y.right = element_text(size = 16, color = "black"),
+    axis.title        = element_text(size = 18, color = "black"),
+    plot.title        = element_text(size = 15, face = "bold", hjust = 0.5),
+    panel.grid        = element_blank(),
+    
+    legend.position   = "bottom",
+    legend.direction  = "horizontal",
+    legend.box        = "horizontal",
+    legend.title      = element_blank(),
+    legend.text       = element_text(size = 10),
+    legend.key.size   = unit(0.45, "cm"),
+    legend.spacing.x  = unit(0.2, "cm"),
+    legend.margin     = margin(t = 2, b = 2),
+    legend.box.margin = margin(t = 0, b = 4),
+    legend.background = element_blank(),
+    
+    plot.margin       = margin(t = 10, r = 12, b = 8, l = 10)
+  )
+
+dir.exists("/Users/dwomoh.13/Desktop/Research")
+dir.exists("/Users/dwomoh.13/Desktop/Research/Data visuals")
+dir.exists("/Users/dwomoh.13/Desktop/Research/Data visuals/claude")
+ggsave("/Users/dwomoh.13/Desktop/Research/Data visuals/claude/AG27XF3.png",
+       plot=last_plot(), width=12, height = 7,
+       dpi=1800)
+
+
+library(lme4)
+library(lmerTest)
+
+library(readxl)
+finall <- read_excel(file.choose())
+
+
+unique(finall$Variety)            # copy the EXACT name you want
+
+variety_to_plot <- "AG30XF4"     # paste exact name here
+
+# >>> THIS LINE creates 'ag' — do not skip it <
+ag <- finall[trimws(as.character(finall$Variety)) == variety_to_plot, ]
+ag <- droplevels(ag)
+
+nrow(ag)                         # MUST be > 0 before you go further
+
+ag$Date <- factor(ag$Date)
+ag$Rep  <- factor(ag$Rep)
+
+model <- lmer(Stand ~ Date + (1 | Rep), data = ag)
+anova(model)
+
+library(multcomp)
+install.packages("emmeans")
+library(emmeans)
+
+em <- emmeans(model,~Date)
+em
+pairs(em, adjust = "tukey")
+cld(em, adjust = "tukey", Letters = letters)
+
+
+
+
+
+nrow(finall)
+unique(finall$Variety)
