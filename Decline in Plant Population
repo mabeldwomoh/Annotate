@@ -15,8 +15,8 @@ summ <- declinerate %>%
 letters_df <- data.frame(
   Variety = c("AG27XF3", "AG30XF4", "AG32XF6", "AG33XF3", "AG34XF6", "AG38XF6",
                 "2824RXF", "3124RXF", "3223RXF", "3424RXF", "3525RXF/SR"),
-  Letters   = c("ab", "abc", "abcd", "cd", "abcd", "a",
-                "d", "abc", "d", "abc", "bcd")
+  Letters   = c("AB", "ABC", "ABCD", "CD", "ABCD", "A",
+                "D", "ABC", "D", "ABC", "BCD")
 )
 
 
@@ -43,11 +43,16 @@ p <- ggplot(summ, aes(x = Variety, y = mean, fill=Variety)) +
     "3424RXF"    = "#5B2C9E",   
     "3525RXF/SR" = "#A8174E"    
     ))+
-  scale_y_continuous(limits = c(0, 110),         
-                     breaks = seq(0, 100, 20),
+  scale_y_continuous(limits = c(0, max(summ$mean + summ$se) * 1.2),
                      expand = expansion(mult = c(0, 0.02))) +
-  labs(x = "Variety", y = "Plant Population Decline from Peak(%)") +
+  labs(x = "Variety", y = "Plant population decline from peak (%)",
+       fill = expression(italic(P)[Variety] < 0.05)) +
   theme_classic(base_size = 14) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "right",
+        legend.justification = c(0.3, 0.20),
+        legend.title.position = "bottom",
+        legend.title = element_text(margin = margin(t = 8)))
 
 print(p)
+
