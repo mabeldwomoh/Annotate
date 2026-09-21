@@ -1,0 +1,53 @@
+% Decline in Plant Population Bar Chart
+
+library(readxl)
+library(dplyr)
+declinerate <- read_excel(file.choose())
+head(declinerate)
+
+summ <- declinerate %>%
+  group_by(Variety) %>%
+  summarise(mean = mean(Percent_Decline, na.rm = TRUE),
+            se   = sd(Percent_Decline, na.rm = TRUE) / sqrt(sum(!is.na(Percent_Decline))),
+            .groups = "drop")
+
+# Type your LSD letters here, one per treatment
+letters_df <- data.frame(
+  Variety = c("AG27XF3", "AG30XF4", "AG32XF6", "AG33XF3", "AG34XF6", "AG38XF6",
+                "2824RXF", "3124RXF", "3223RXF", "3424RXF", "3525RXF/SR"),
+  Letters   = c("ab", "abc", "abcd", "cd", "abcd", "a",
+                "d", "abc", "d", "abc", "bcd")
+)
+
+
+summ <- left_join(summ, letters_df, by = "Variety")
+summ$Variety <- reorder(summ$Variety, -summ$mean)
+
+library(ggplot2)
+p <- ggplot(summ, aes(x = Variety, y = mean, fill=Variety)) +
+  geom_col(color = "black", width = 0.7) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+                width = 0.2, linewidth = 0.5) +
+  geom_text(aes(y = mean + se, label = Letters),
+            vjust = -0.6, size = 5) +
+  scale_fill_manual(values = c(
+    "AG27XF3"    = "#1E7FD8",   
+    "AG30XF4"    = "#F28C00",   
+    "AG32XF6"    = "#7B61FF",   
+    "AG33XF3"    = "#5AA02C",   
+    "AG34XF6"    = "#EC4F8B",   
+    "AG38XF6"    = "#8C8272",   
+    "2824RXF"    = "#12A386",   
+    "3124RXF"    = "#E8603C",   
+    "3223RXF"    = "#F2B705",   
+    "3424RXF"    = "#5B2C9E",   
+    "3525RXF/SR" = "#A8174E"    
+    ))+
+  scale_y_continuous(limits = c(0, 110),         
+                     breaks = seq(0, 100, 20),
+                     expand = expansion(mult = c(0, 0.02))) +
+  labs(x = "Variety", y = "Plant Population Decline from Peak(%)") +
+  theme_classic(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(p)
