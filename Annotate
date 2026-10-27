@@ -213,6 +213,150 @@ ggplot(plot_dataa, aes(x = x)) +
     plot.margin       = margin(t = 10, r = 12, b = 8, l = 10)
   )
 
+
+#New Increased Font sizes
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+install.packages("ragg")
+
+final <- read_excel(file.choose())
+
+final$Hectares <- as.numeric(final$Hectares)
+final$Rainfall <- as.numeric(final$Rainfall)
+final$LT       <- as.numeric(final$LT)
+head(final)
+
+
+
+final$Date <- as.Date(final$Date)
+
+variety_to_plot <- "3525RXFSR"
+
+
+plot_dataa <- final %>%
+  filter(Variety == variety_to_plot) %>%
+  group_by(Date) %>%
+  summarise(
+    Mean_Hectares = mean(Hectares, na.rm = TRUE),
+    SD = sd(Hectares, na.rm = TRUE),
+    n  = n(),
+    SE = SD / sqrt(n),
+    LT = mean(LT, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(Date)
+
+plot_dataa$Date_factor <- factor(
+  format(plot_dataa$Date, "%b %d"),
+  levels = format(plot_dataa$Date, "%b %d")
+)
+
+my_letters <- c("b","b","a","a","a","c")
+plot_dataa$Letters  <- my_letters
+plot_dataa$letter_y <- plot_dataa$Mean_Hectares + plot_dataa$SE + 13   # more space above error bars
+
+Positions, max survival, plateau, decline 
+plot_dataa$x <- seq_len(nrow(plot_dataa))
+MAXSURV <- max(plot_dataa$Mean_Hectares)
+MAX_X   <- plot_dataa$x[which.max(plot_dataa$Mean_Hectares)]
+
+max_ltr <- plot_dataa$Letters[which.max(plot_dataa$Mean_Hectares)]
+shares  <- vapply(plot_dataa$Letters, function(l)
+  any(strsplit(l, "")[[1]] %in% strsplit(max_ltr, "")[[1]]), logical(1))
+PLATEAU <- range(plot_dataa$x[shares])
+DECLINE <- c(PLATEAU[2], PLATEAU[2] + 1)
+
+Temperature scaling for the second axis 
+stand_max <- 300
+temp_min  <- -6
+temp_max  <- 6
+sec.axis = sec_axis(~ (. / stand_max) * (temp_max - temp_min) + temp_min,
+                    name = "Temperature (\u00b0C)",
+                    breaks = seq(-6, 6, by = 2))
+plot_dataa$LT_scaled <- (plot_dataa$LT - temp_min) / (temp_max - temp_min) * stand_max
+
+# Decline label 
+DECLINE_Y   <- 325   # sits above the bars
+LT_survived <- plot_dataa$LT[PLATEAU[2]]
+LT_declined <- plot_dataa$LT[DECLINE[2]]
+decline_label <- sprintf("decline window\nsurvived %.1f \u00b0C  \u2192  %.1f \u00b0C",
+                         LT_survived, LT_declined)
+
+# Plot 
+p <- ggplot(plot_dataa, aes(x = x)) +
+  
+  annotate("rect",
+           xmin = DECLINE[1], xmax = DECLINE[2],
+           ymin = -Inf, ymax = Inf,
+           fill = "red", alpha = 0.07) +
+  annotate("text",
+           x = mean(DECLINE), y = DECLINE_Y,
+           label = decline_label,
+           color = "darkred", size = 10, lineheight = 0.9) +
+  
+  geom_hline(yintercept = MAXSURV,
+             linetype = "dashed", color = "darkgreen", linewidth = 1.5) +
+  annotate("label",
+           x = -Inf, y = MAXSURV + 24, hjust = 0,
+           label = paste0("Max survival = ",
+                          format(round(MAXSURV) * 1000, big.mark = ",", scientific = FALSE),
+                          " "),
+           color = "darkgreen", size = 5,
+           fill = "white", border.colour = NA) +
+  
+  geom_col(aes(y = Mean_Hectares, fill = Date_factor),
+           color = "grey20", linewidth = 0.6, width = 0.8) +
+  
+  geom_errorbar(aes(ymin = Mean_Hectares - SE, ymax = Mean_Hectares + SE),
+                width = 0.25, linewidth = 0.8, color = "black") +
+  
+  geom_text(aes(y = letter_y, label = Letters), size = 15) +
+  
+  annotate("point", x = MAX_X, y = MAXSURV, color = "darkgreen", size = 5) +
+  
+  geom_line(aes(y = LT_scaled, group = 1), color = "blue4", linewidth = 3) +
+  geom_point(aes(y = LT_scaled), color = "blue4", size = 4) +
+  
+  scale_fill_manual(values = c(
+    "Oct 09" = "#85B7EB", "Oct 16" = "#EF9F27", "Oct 21" = "#AFA9EC",
+    "Oct 27" = "#97C459", "Nov 05" = "#ED93B1", "Nov 13" = "#B4B2A9"
+  )) +
+  
+  scale_x_continuous(breaks = plot_dataa$x,
+                     labels = as.character(plot_dataa$Date_factor)) +
+  
+  scale_y_continuous(
+    name   = "1,000 plants/ha",
+    limits = c(0, 345),
+    breaks = seq(0, 300, by = 50),
+    expand = expansion(mult = c(0, 0.01)),
+    sec.axis = sec_axis(~ (. / stand_max) * (temp_max - temp_min) + temp_min,
+                        name = "Temperature (\u00b0C)",
+                        breaks = seq(temp_min, temp_max, length.out = 5))
+  ) +
+  
+  labs(x = "Date of Observation", title = variety_to_plot) +
+  
+  theme_bw(base_size = 24) +
+  theme(
+    axis.text          = element_text(size = 35, color = "black"),
+    axis.text.x        = element_text(angle = 45, hjust = 1),
+    axis.title         = element_text(size = 30),
+    axis.title.y.left  = element_text(margin = margin(r = 14)),
+    axis.title.y.right = element_text(margin = margin(l = 14)),
+    plot.title         = element_text(size = 34, face = "bold", hjust = 0.5),
+    panel.grid         = element_blank(),
+    legend.position    = "none",
+    plot.margin        = margin(t = 15, r = 20, b = 10, l = 15)
+  )
+print(p)
+
+
+
+
+
 dir.exists("/Users/dwomoh.13/Desktop/Research")
 dir.exists("/Users/dwomoh.13/Desktop/Research/Data visuals")
 dir.exists("/Users/dwomoh.13/Desktop/Research/Data visuals/claude")
