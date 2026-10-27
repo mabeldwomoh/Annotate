@@ -1,0 +1,70 @@
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+dat <- read_excel(file.choose())
+head(dat)
+
+dat <- dat %>%
+  mutate(across(c(Warm, Cold, Accel, SC_Nov5_ha), as.numeric))
+
+# ---- Average each variety (one row per variety) ----
+m <- dat %>%
+  group_by(Variety) %>%
+  summarise(across(c(Warm, Cold, Accel, SC_Nov5_ha), ~ mean(.x, na.rm = TRUE)),
+            .groups = "drop")
+
+cat("Varieties:", nrow(m), "\n")   # should print 11
+
+# ---- Regressions on the variety means ----
+fit_w <- lm(SC_Nov5_ha ~ Warm,  data = m)
+fit_c <- lm(SC_Nov5_ha ~ Cold,  data = m)
+fit_a <- lm(SC_Nov5_ha ~ Accel, data = m)
+
+lab <- function(f, name) {
+  s <- summary(f); b <- coef(f); p <- coef(s)[2, 4]
+  sprintf("%-27s y = %6.2f + %.3fx    R\u00b2 = %.3f    %s", paste0(name, ":"), b[1], b[2],   # CHANGED: pads names to equal width
+          s$r.squared,
+          ifelse(p < 0.01, "p < 0.01",
+                 ifelse(p < 0.05, "p < 0.05", sprintf("p = %.2f", p))))
+}
+
+# ---- Reshape so all three tests plot from one column ----
+long <- m %>%
+  select(SC_Nov5_ha, Warm, Cold, Accel) %>%
+  pivot_longer(c(Warm, Cold, Accel), names_to = "Test", values_to = "Germ") %>%
+  filter(!is.na(Germ), !is.na(SC_Nov5_ha)) %>%
+  mutate(Test = recode(Test,
+                       Warm  = "Standard warm germination",
+                       Cold  = "Cold vigor",
+                       Accel = "Accelerated aging"),
+         Test = factor(Test, levels = c("Standard warm germination",
+                                        "Cold vigor", "Accelerated aging")))
+
+cols <- c("Standard warm germination" = "#CC0000",   # CHANGED: deeper red
+          "Cold vigor"                = "#1A3A9E",   # CHANGED: deeper blue
+          "Accelerated aging"         = "#D96C00")   # CHANGED: deeper orange
+
+# ---- Plot ----
+p <- ggplot(long, aes(Germ, SC_Nov5_ha, color = Test, fill = Test)) +
+  geom_smooth(method = "lm", formula = y ~ x, alpha = 0.2, linewidth = 1.8) +
+  geom_point(size = 5, alpha = 1) +                  # CHANGED: fully solid, slightly bigger
+  scale_color_manual(values = cols, name = NULL) +
+  scale_fill_manual(values = cols, name = NULL) +
+  labs(x = "Germination Percentage (%)", y = "1,000 plants/ha",
+       caption = paste(lab(fit_w, "Standard warm germination"),
+                       lab(fit_c, "Cold vigor"),
+                       lab(fit_a, "Accelerated aging"), sep = "\n")) +
+  theme_classic(base_family = "serif", base_size = 50) +
+  theme(
+    axis.text       = element_text(size = 35, color = "black"),
+    axis.title      = element_text(size = 35),
+    legend.position = "top",
+    legend.text     = element_text(size = 30),
+    legend.key.size = unit(1.5, "cm"),
+    plot.caption    = element_text(hjust = 0, size = 22, lineheight = 1.5,
+                                   family = "mono")  # CHANGED: equal-width font so the columns line up
+  )
+
+p
